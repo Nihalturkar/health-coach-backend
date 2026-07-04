@@ -31,7 +31,14 @@ target_metadata = Base.metadata
 # Replace asyncpg with psycopg2 for Alembic (Alembic needs sync driver)
 def get_url():
     url = os.getenv("DATABASE_URL", "")
-    return url.replace("postgresql+asyncpg://", "postgresql+psycopg2://")
+    # Normalize any postgres URL format to psycopg2 for Alembic
+    if url.startswith("postgres://"):
+        url = url.replace("postgres://", "postgresql+psycopg2://", 1)
+    elif url.startswith("postgresql://"):
+        url = url.replace("postgresql://", "postgresql+psycopg2://", 1)
+    elif url.startswith("postgresql+asyncpg://"):
+        url = url.replace("postgresql+asyncpg://", "postgresql+psycopg2://", 1)
+    return url
 
 
 def run_migrations_offline() -> None:
