@@ -67,5 +67,8 @@ app.include_router(sync_router.router, prefix="/api/v1")
 
 
 @app.get("/health")
+@app.head("/health")
+@app.get("/")
+@app.head("/")
 async def health():
     return {"status": "ok"}
