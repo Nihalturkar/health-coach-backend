@@ -115,7 +115,10 @@ async def telegram_webhook(
     db: AsyncSession = Depends(get_db),
 ):
     """Handle incoming Telegram updates."""
-    data = await request.json()
+    try:
+        data = await request.json()
+    except Exception:
+        return {"ok": True}
 
     # Extract message
     message = data.get("message")
@@ -128,111 +131,139 @@ async def telegram_webhook(
     text_lower = text.lower()
     from_name = message["from"].get("first_name", "")
 
-    # --- /start or help ---
-    if text_lower in ("/start", "help", "hi", "hello"):
-        await _send_message(chat_id, HELP_TEXT)
-        return {"ok": True}
-
-    # --- Link account ---
-    if text_lower.startswith("link "):
-        email = text[5:].strip().lower()
-        result = await db.execute(
-            select(User).where(User.email == email)
-        )
-        user = result.scalar_one_or_none()
-        if not user:
-            await _send_message(chat_id, f"❌ No account found with email `{email}`.\nMake sure you've registered in the app first.")
+    try:
+        # --- /start or help ---
+        if text_lower in ("/start", "help", "hi", "hello"):
+            await _send_message(chat_id, HELP_TEXT)
             return {"ok": True}
 
-        user.phone = f"tg:{telegram_id}"
-        await db.commit()
-        await _send_message(chat_id, f"✅ Linked to *{user.name}*!\n\nYou can now log meals, water, weight directly here. Send `help` to see commands.")
-        return {"ok": True}
+        # --- Ensure phone column exists (safe migration) ---
+        try:
+            await db.execute(select(User).where(User.phone == f"tg:test").limit(1))
+        except Exception:
+            # phone column doesn't exist yet — run ALTER TABLE
+            await db.rollback()
+            try:
+                await db.execute(
+                    __import__('sqlalchemy').text(
+                        "ALTER TABLE users ADD COLUMN IF NOT EXISTS phone VARCHAR(20) UNIQUE"
+                    )
+                )
+                await db.commit()
+                print("[TELEGRAM] Added phone column to users table")
+            except Exception as e:
+                print(f"[TELEGRAM] Could not add phone column: {e}")
+                await db.rollback()
 
-    # --- Find user ---
-    user = await _find_user_by_telegram(db, telegram_id)
-    if not user:
-        await _send_message(chat_id, f"Hey {from_name}! 👋\n\n" + LINK_INSTRUCTIONS)
-        return {"ok": True}
+        # --- Link account ---
+        if text_lower.startswith("link "):
+            email = text[5:].strip().lower()
+            result = await db.execute(
+                select(User).where(User.email == email)
+            )
+            user = result.scalar_one_or_none()
+            if not user:
+                await _send_message(chat_id, f"❌ No account found with email `{email}`.\nMake sure you've registered in the app first.")
+                return {"ok": True}
 
-    user_id = str(user.id)
-    today = date.today()
+            user.phone = f"tg:{telegram_id}"
+            await db.commit()
+            await _send_message(chat_id, f"✅ Linked to *{user.name}*!\n\nYou can now log meals, water, weight directly here. Send `help` to see commands.")
+            return {"ok": True}
 
-    # --- Water ---
-    if text_lower.startswith("water") or "pani" in text_lower or "paani" in text_lower:
-        nums = re.findall(r'\d+', text)
-        ml = int(nums[0]) if nums else 250
-        await tracking_service.log_water(db, user_id, today, ml)
-        await _send_message(chat_id, f"💧 Logged *{ml}ml* water!")
-        return {"ok": True}
+        # --- Find user ---
+        user = await _find_user_by_telegram(db, telegram_id)
+        if not user:
+            await _send_message(chat_id, f"Hey {from_name}! 👋\n\n" + LINK_INSTRUCTIONS)
+            return {"ok": True}
 
-    # --- Weight ---
-    if text_lower.startswith("weight") or text_lower.startswith("wajan"):
-        nums = re.findall(r'[\d.]+', text)
-        if nums:
-            weight = float(nums[0])
-            await tracking_service.log_weight(db, user_id, today, weight)
-            await _send_message(chat_id, f"⚖️ Weight logged: *{weight} kg*")
+        user_id = str(user.id)
+        today = date.today()
+
+        # --- Water ---
+        if text_lower.startswith("water") or "pani" in text_lower or "paani" in text_lower:
+            nums = re.findall(r'\d+', text)
+            ml = int(nums[0]) if nums else 250
+            await tracking_service.log_water(db, user_id, today, ml)
+            await _send_message(chat_id, f"💧 Logged *{ml}ml* water!")
+            return {"ok": True}
+
+        # --- Weight ---
+        if text_lower.startswith("weight") or text_lower.startswith("wajan"):
+            nums = re.findall(r'[\d.]+', text)
+            if nums:
+                weight = float(nums[0])
+                await tracking_service.log_weight(db, user_id, today, weight)
+                await _send_message(chat_id, f"⚖️ Weight logged: *{weight} kg*")
+            else:
+                await _send_message(chat_id, "Send weight with a number, e.g. `weight 72.5`")
+            return {"ok": True}
+
+        # --- Summary ---
+        if text_lower in ("summary", "today", "aaj", "status"):
+            summary = await tracking_service.get_today_summary(db, user_id, today)
+            streaks = await get_streaks(db, user_id, today)
+            reply = (
+                f"📊 *Today's Summary*\n\n"
+                f"🔥 Calories: *{summary['total_calories']}* cal\n"
+                f"💪 Protein: *{summary['total_protein']}g*\n"
+                f"💧 Water: *{summary['total_water_ml']}ml*\n"
+                f"🍽️ Meals: {len(summary['meal_logs'])}\n"
+                f"🏋️ Workouts: {len(summary['workout_logs'])}\n\n"
+                f"🔥 Streak: *{streaks['current_streak']}* days | Best: *{streaks['best_streak']}*"
+            )
+            await _send_message(chat_id, reply)
+            return {"ok": True}
+
+        # --- Streak ---
+        if text_lower in ("streak", "streaks"):
+            streaks = await get_streaks(db, user_id, today)
+            reply = (
+                f"🔥 Current streak: *{streaks['current_streak']} days*\n"
+                f"🏆 Best streak: *{streaks['best_streak']} days*\n"
+                f"📅 Total active days: *{streaks['total_active_days']}*"
+            )
+            await _send_message(chat_id, reply)
+            return {"ok": True}
+
+        # --- Meal (natural language) ---
+        parsed = await _parse_meal_with_ai(text)
+        if parsed and parsed.get("meal_name"):
+            await tracking_service.log_meal(db, user_id, {
+                "log_date": today,
+                "meal_type": parsed.get("meal_type", "lunch"),
+                "meal_name": parsed["meal_name"],
+                "calories": parsed.get("calories", 0),
+                "protein_g": parsed.get("protein_g", 0),
+                "carbs_g": parsed.get("carbs_g", 0),
+                "fats_g": parsed.get("fats_g", 0),
+            })
+            reply = (
+                f"🍽️ Logged: *{parsed['meal_name']}*\n"
+                f"Calories: ~{parsed.get('calories', '?')} cal\n"
+                f"Protein: ~{parsed.get('protein_g', '?')}g\n\n"
+                f"_Not right? Log again with correct info._"
+            )
+            await _send_message(chat_id, reply)
         else:
-            await _send_message(chat_id, "Send weight with a number, e.g. `weight 72.5`")
+            await _send_message(chat_id, (
+                "🤔 Couldn't understand that. Try:\n\n"
+                "🍽️ `ate 2 roti dal rice`\n"
+                "💧 `water 500`\n"
+                "⚖️ `weight 72`\n"
+                "📊 `summary`"
+            ))
+
         return {"ok": True}
 
-    # --- Summary ---
-    if text_lower in ("summary", "today", "aaj", "status"):
-        summary = await tracking_service.get_today_summary(db, user_id, today)
-        streaks = await get_streaks(db, user_id, today)
-        reply = (
-            f"📊 *Today's Summary*\n\n"
-            f"🔥 Calories: *{summary['total_calories']}* cal\n"
-            f"💪 Protein: *{summary['total_protein']}g*\n"
-            f"💧 Water: *{summary['total_water_ml']}ml*\n"
-            f"🍽️ Meals: {len(summary['meal_logs'])}\n"
-            f"🏋️ Workouts: {len(summary['workout_logs'])}\n\n"
-            f"🔥 Streak: *{streaks['current_streak']}* days | Best: *{streaks['best_streak']}*"
-        )
-        await _send_message(chat_id, reply)
+    except Exception as e:
+        print(f"[TELEGRAM] Webhook error: {e}")
+        # Try to notify user something went wrong
+        try:
+            await _send_message(chat_id, "⚠️ Something went wrong. Please try again.")
+        except Exception:
+            pass
         return {"ok": True}
-
-    # --- Streak ---
-    if text_lower in ("streak", "streaks"):
-        streaks = await get_streaks(db, user_id, today)
-        reply = (
-            f"🔥 Current streak: *{streaks['current_streak']} days*\n"
-            f"🏆 Best streak: *{streaks['best_streak']} days*\n"
-            f"📅 Total active days: *{streaks['total_active_days']}*"
-        )
-        await _send_message(chat_id, reply)
-        return {"ok": True}
-
-    # --- Meal (natural language) ---
-    parsed = await _parse_meal_with_ai(text)
-    if parsed and parsed.get("meal_name"):
-        await tracking_service.log_meal(db, user_id, {
-            "log_date": today,
-            "meal_type": parsed.get("meal_type", "lunch"),
-            "meal_name": parsed["meal_name"],
-            "calories": parsed.get("calories", 0),
-            "protein_g": parsed.get("protein_g", 0),
-            "carbs_g": parsed.get("carbs_g", 0),
-            "fats_g": parsed.get("fats_g", 0),
-        })
-        reply = (
-            f"🍽️ Logged: *{parsed['meal_name']}*\n"
-            f"Calories: ~{parsed.get('calories', '?')} cal\n"
-            f"Protein: ~{parsed.get('protein_g', '?')}g\n\n"
-            f"_Not right? Log again with correct info._"
-        )
-        await _send_message(chat_id, reply)
-    else:
-        await _send_message(chat_id, (
-            "🤔 Couldn't understand that. Try:\n\n"
-            "🍽️ `ate 2 roti dal rice`\n"
-            "💧 `water 500`\n"
-            "⚖️ `weight 72`\n"
-            "📊 `summary`"
-        ))
-
-    return {"ok": True}
 
 
 @router.get("/setup-webhook")
