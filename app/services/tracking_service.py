@@ -46,6 +46,51 @@ async def delete_workout_log(db: AsyncSession, user_id: str, log_id: str) -> dic
     return {"message": "Workout log deleted"}
 
 
+async def update_meal_log(db: AsyncSession, user_id: str, log_id: str, data: dict) -> MealLog:
+    result = await db.execute(
+        select(MealLog).where(MealLog.id == log_id, MealLog.user_id == user_id)
+    )
+    log = result.scalar_one_or_none()
+    if not log:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Meal log not found")
+    for key, value in data.items():
+        if value is not None:
+            setattr(log, key, value)
+    await db.commit()
+    await db.refresh(log)
+    return log
+
+
+async def update_workout_log(db: AsyncSession, user_id: str, log_id: str, data: dict) -> WorkoutLog:
+    result = await db.execute(
+        select(WorkoutLog).where(WorkoutLog.id == log_id, WorkoutLog.user_id == user_id)
+    )
+    log = result.scalar_one_or_none()
+    if not log:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Workout log not found")
+    for key, value in data.items():
+        if value is not None:
+            setattr(log, key, value)
+    await db.commit()
+    await db.refresh(log)
+    return log
+
+
+async def update_daily_log(db: AsyncSession, user_id: str, log_date: date, data: dict) -> DailyLog:
+    result = await db.execute(
+        select(DailyLog).where(DailyLog.user_id == user_id, DailyLog.log_date == log_date)
+    )
+    daily = result.scalar_one_or_none()
+    if not daily:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Daily log not found for this date")
+    for key, value in data.items():
+        if value is not None:
+            setattr(daily, key, value)
+    await db.commit()
+    await db.refresh(daily)
+    return daily
+
+
 async def log_water(db: AsyncSession, user_id: str, log_date: date, water_ml: int) -> DailyLog:
     result = await db.execute(
         select(DailyLog).where(DailyLog.user_id == user_id, DailyLog.log_date == log_date)

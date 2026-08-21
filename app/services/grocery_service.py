@@ -18,7 +18,7 @@ async def get_weekly_grocery(db: AsyncSession, user_id: str) -> GroceryList:
             GroceryList.week_number == week_number,
         ).order_by(GroceryList.created_at.desc())
     )
-    grocery = result.scalar_one_or_none()
+    grocery = result.scalars().first()
     if not grocery:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -34,7 +34,7 @@ async def get_monthly_grocery(db: AsyncSession, user_id: str) -> GroceryList:
             GroceryList.list_type == "monthly",
         ).order_by(GroceryList.created_at.desc())
     )
-    grocery = result.scalar_one_or_none()
+    grocery = result.scalars().first()
     if not grocery:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -133,13 +133,38 @@ def _categorize_ingredient(name: str) -> str:
 
 
 def _estimate_price(name: str, budget_level: str) -> float:
+    """Estimate weekly grocery price per item. Target: ~₹2500-3500/month = ~₹700/week."""
     base_prices = {
-        "chicken": 200, "egg": 80, "paneer": 120, "milk": 60,
-        "oats": 90, "rice": 70, "banana": 40, "apple": 100,
-        "spinach": 30, "tomato": 40, "onion": 30, "dal": 100,
+        # Protein (weekly qty)
+        "chicken": 120, "egg": 50, "paneer": 60, "fish": 100,
+        "mutton": 150, "tofu": 40, "soy": 30,
+        # Dairy
+        "milk": 30, "curd": 25, "yogurt": 25, "butter": 25,
+        "ghee": 30, "cheese": 40, "whey": 80,
+        # Grains/Staples
+        "oats": 25, "rice": 30, "wheat": 20, "bread": 30,
+        "roti": 10, "atta": 25, "poha": 15, "pasta": 25,
+        "idli": 15, "dosa": 15, "semolina": 15, "pongal": 15,
+        # Dal/Lentils
+        "dal": 30, "lentil": 30, "chana": 25, "rajma": 30,
+        # Vegetables
+        "spinach": 15, "tomato": 15, "onion": 10, "garlic": 10,
+        "carrot": 15, "capsicum": 20, "beans": 15,
+        "broccoli": 25, "cucumber": 10, "potato": 10,
+        # Fruits
+        "banana": 15, "apple": 30, "mango": 30, "orange": 20,
+        # Nuts/Fats
+        "almond": 30, "walnut": 40, "peanut": 15, "cashew": 30,
+        "coconut": 15, "nuts": 25,
+        # Misc/Low cost
+        "salt": 2, "spice": 5, "water": 0, "oil": 15,
+        "sauce": 15, "chutney": 10, "sambar": 15,
+        "juice": 25, "lime": 5, "honey": 20, "sugar": 5,
+        "batter": 20, "makhana": 20,
     }
-    multiplier = {"low": 0.7, "medium": 1.0, "high": 1.4}.get(budget_level, 1.0)
+    multiplier = {"low": 0.8, "medium": 1.0, "high": 1.3}.get(budget_level, 1.0)
+    name_lower = name.lower()
     for key, price in base_prices.items():
-        if key in name:
+        if key in name_lower:
             return round(price * multiplier)
-    return round(50 * multiplier)
+    return round(10 * multiplier)

@@ -31,12 +31,12 @@ def determine_split(fitness_level: str) -> dict:
 
 MUSCLE_GROUPS = {
     "push": ["chest", "shoulders", "triceps"],
-    "pull": ["back", "biceps"],
+    "pull": ["back", "biceps", "rear_delts"],
     "legs": ["quads", "hamstrings", "glutes", "calves"],
     "upper_body": ["chest", "back", "shoulders", "biceps", "triceps"],
     "lower_body": ["quads", "hamstrings", "glutes", "calves"],
-    "full_body": ["chest", "back", "shoulders", "quads", "core"],
-    "cardio": ["full_body"],
+    "full_body": ["chest", "back", "shoulders", "quads", "hamstrings", "glutes", "core", "biceps", "triceps"],
+    "cardio": ["full_body", "cardio"],
     "rest": [],
 }
 
@@ -47,14 +47,25 @@ def validate_workout_day(exercises: list, available_equipment: list, workout_typ
     actual_muscles = {e.get("muscle_group", "").lower() for e in exercises}
 
     equipment_issues = []
+    muscle_issues = []
+
     for ex in exercises:
+        # Check equipment
         eq = ex.get("equipment", "bodyweight")
         if eq != "bodyweight" and eq not in available_equipment:
             equipment_issues.append(f"{ex.get('exercise_name')}: requires {eq}")
 
+        # Check muscle group matches workout type
+        mg = ex.get("muscle_group", "").lower()
+        if expected_muscles and mg and mg not in expected_muscles and mg != "core":
+            muscle_issues.append(
+                f"{ex.get('exercise_name')}: muscle '{mg}' doesn't belong in '{workout_type}' day"
+            )
+
     return {
-        "passed": len(equipment_issues) == 0,
+        "passed": len(equipment_issues) == 0 and len(muscle_issues) == 0,
         "equipment_issues": equipment_issues,
+        "muscle_issues": muscle_issues,
         "expected_muscles": list(expected_muscles),
         "actual_muscles": list(actual_muscles),
     }
@@ -74,3 +85,21 @@ def validate_consecutive_muscles(days: list) -> dict:
         if overlap:
             issues.append(f"Day {i} and {i+1}: overlapping muscles {overlap}")
     return {"passed": len(issues) == 0, "issues": issues}
+
+
+def filter_wrong_muscle_exercises(exercises: list, workout_type: str) -> list:
+    """Remove exercises whose muscle_group doesn't match the workout_type."""
+    expected = set(MUSCLE_GROUPS.get(workout_type, []))
+    if not expected:
+        return exercises
+
+    filtered = []
+    for ex in exercises:
+        mg = ex.get("muscle_group", "").lower()
+        # Allow core exercises in any day, and keep exercises with matching muscles
+        if mg in expected or mg == "core" or not mg:
+            filtered.append(ex)
+        else:
+            print(f"  [FILTER] Removed '{ex.get('exercise_name')}' ({mg}) from {workout_type} day")
+
+    return filtered

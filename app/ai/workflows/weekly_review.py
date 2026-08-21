@@ -12,6 +12,8 @@ from app.models.health_profile import HealthProfile
 from app.models.progress import WeeklyReport
 from app.services.progress_service import generate_weekly_report_data
 from app.redis import cache_delete
+from app.ai.workflows.diet_planner import generate_diet_plan
+from app.ai.workflows.workout_planner import generate_workout_plan
 
 
 async def run_weekly_review(db: AsyncSession, user_id: str, week_number: int) -> WeeklyReport:
@@ -56,6 +58,20 @@ async def run_weekly_review(db: AsyncSession, user_id: str, week_number: int) ->
 
     # Invalidate caches so next week gets fresh plan
     await cache_delete(f"meal_plan:{user_id}:{week_number + 1}")
+
+    # --- Node 5b: Auto-generate next week's plans ---
+    next_week = week_number + 1
+    try:
+        await generate_diet_plan(db, user_id, next_week)
+        print(f"  [AUTO] Diet plan generated for week {next_week}")
+    except Exception as e:
+        print(f"  [AUTO-FAIL] Diet plan week {next_week}: {e}")
+
+    try:
+        await generate_workout_plan(db, user_id, next_week)
+        print(f"  [AUTO] Workout plan generated for week {next_week}")
+    except Exception as e:
+        print(f"  [AUTO-FAIL] Workout plan week {next_week}: {e}")
 
     # --- Node 6: Save Report ---
     result = await db.execute(

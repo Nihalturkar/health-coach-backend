@@ -17,6 +17,7 @@ from app.routers import diet as diet_router
 from app.routers import workout as workout_router
 from app.routers import ai as ai_router
 from app.routers import sync as sync_router
+from app.routers import telegram_bot as telegram_router
 
 scheduler = AsyncIOScheduler()
 
@@ -29,9 +30,11 @@ async def lifespan(app: FastAPI):
     # Schedule cron jobs
     from app.tasks.weekly_review_cron import run_weekly_review_for_all
     from app.tasks.otp_cleanup_cron import cleanup_expired_otps
+    from app.tasks.reminder_cron import run_reminders
 
     scheduler.add_job(run_weekly_review_for_all, "cron", day_of_week="sun", hour=21, minute=0)
     scheduler.add_job(cleanup_expired_otps, "cron", hour=3, minute=0)
+    scheduler.add_job(run_reminders, "cron", minute=0)  # Every hour on the hour
     scheduler.start()
 
     yield
@@ -64,6 +67,7 @@ app.include_router(diet_router.router, prefix="/api/v1")
 app.include_router(workout_router.router, prefix="/api/v1")
 app.include_router(ai_router.router, prefix="/api/v1")
 app.include_router(sync_router.router, prefix="/api/v1")
+app.include_router(telegram_router.router, prefix="/api/v1")
 
 
 @app.get("/health")

@@ -26,6 +26,11 @@ class DashboardResponse(BaseModel):
     avg_protein_this_week: float
     weight_change_this_week: Optional[float]
 
+    # Streaks
+    current_streak: int
+    best_streak: int
+    total_active_days: int
+
 
 class GraphPoint(BaseModel):
     date: date

@@ -20,8 +20,14 @@ def get_diet_prompt(profile: dict) -> str:
 - Carbs: {profile['target_carbs']}g/day
 - Fats: {profile['target_fats']}g/day
 
+## User Preferences (from past feedback)
+- Liked meals: {', '.join(profile.get('liked_meals', [])) or 'none yet'}
+- Disliked meals: {', '.join(profile.get('disliked_meals', [])) or 'none yet'}
+
 ## Rules
 1. Focus on Indian meals (dal, roti, rice, sabzi, etc.)
+14. Include meals SIMILAR to liked meals (same style/ingredients)
+15. AVOID meals similar to disliked meals
 2. Each day must have: breakfast, mid_morning, lunch, evening_snack, dinner
 3. Total daily calories must be within ±100 of target
 4. Total daily protein must be within ±10g of target

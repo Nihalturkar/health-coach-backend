@@ -11,6 +11,7 @@ class User(Base):
     password_hash = Column(String(255), nullable=False)
     name = Column(String(100), nullable=False)
     email_verified = Column(Boolean, default=False)
+    phone = Column(String(20), unique=True, nullable=True, index=True)
     avatar_url = Column(String, nullable=True)
     firebase_uid = Column(String(128), unique=True, nullable=True)
     is_active = Column(Boolean, default=True)

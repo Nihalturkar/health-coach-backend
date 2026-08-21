@@ -23,17 +23,52 @@ def get_workout_prompt(profile: dict) -> str:
 ## Training Split
 {split}
 
-## Rules
-1. Each workout day: 5-8 exercises + warm-up notes + cool-down notes
-2. Rest days: mark workout_type as "rest" with optional stretching/yoga
+## User Feedback (from past workouts)
+- Painful/injury-risk exercises (MUST AVOID): {', '.join(profile.get('painful_exercises', [])) or 'none'}
+- Too hard exercises (use easier alternatives): {', '.join(profile.get('too_hard_exercises', [])) or 'none'}
+- Too easy exercises (increase difficulty/weight): {', '.join(profile.get('too_easy_exercises', [])) or 'none'}
+
+## STRICT Muscle Group Rules (CRITICAL — follow exactly)
+
+workout_type "push" → ONLY exercises for: chest, shoulders, triceps
+  - Chest: bench press, push-ups, chest fly, dumbbell press, cable crossover
+  - Shoulders: overhead press, lateral raise, front raise, face pull
+  - Triceps: tricep dips, skull crushers, rope pushdown, overhead extension
+
+workout_type "pull" → ONLY exercises for: back, biceps, rear delts
+  - Back: pull-ups, lat pulldown, barbell row, seated row, deadlift
+  - Biceps: barbell curl, dumbbell curl, hammer curl, preacher curl
+  - Rear delts: face pull, reverse fly
+
+workout_type "legs" → ONLY exercises for: quads, hamstrings, glutes, calves
+  - Quads: squats, leg press, lunges, leg extension, goblet squat
+  - Hamstrings: Romanian deadlift, leg curl, stiff-leg deadlift
+  - Glutes: hip thrust, glute bridge, Bulgarian split squat, sumo deadlift
+  - Calves: calf raises (standing/seated)
+
+workout_type "upper_body" → chest, back, shoulders, biceps, triceps
+workout_type "lower_body" → quads, hamstrings, glutes, calves
+workout_type "full_body" → one exercise per major group: chest, back, shoulders, legs, core
+workout_type "cardio" → running, cycling, jump rope, HIIT, burpees
+workout_type "rest" → no exercises, just stretching notes
+
+NEVER put a back exercise in push day. NEVER put a chest exercise in pull day.
+NEVER put an arm exercise in legs day. Each exercise's muscle_group MUST match the day type.
+
+## General Rules
+1. Each workout day: 5-8 exercises
+2. Rest days: mark workout_type as "rest" with no exercises array
 3. Include sets, reps (as string like "12" or "8-12" or "30 sec"), rest_seconds
 4. Only use exercises possible with available equipment
 5. For home workouts without equipment: bodyweight exercises only
 6. No same muscle group on consecutive days (except rest/cardio)
 7. Include suggested_weight_kg (null for bodyweight exercises)
-8. Muscle groups: chest, back, shoulders, biceps, triceps, quads, hamstrings, glutes, calves, core, full_body
-9. Equipment options: bodyweight, dumbbells, barbell, resistance_bands, pull_up_bar, bench, machine
-10. Duration should be 30-60 minutes per session
+8. Equipment options: bodyweight, dumbbells, barbell, resistance_bands, pull_up_bar, bench, machine
+9. Duration should be 30-60 minutes per session
+10. NEVER include painful/injury-risk exercises from feedback
+11. Replace "too hard" exercises with easier alternatives targeting the same muscle
+12. For "too easy" exercises, add more sets/reps or suggest heavier weights
+13. Each exercise MUST have clear step-by-step instructions explaining proper form
 
 ## Output Format
 Return valid JSON only. No markdown, no explanation. Structure:
@@ -42,19 +77,19 @@ Return valid JSON only. No markdown, no explanation. Structure:
     {{
       "day_of_week": 1,
       "workout_type": "push",
-      "title": "Push Day - Chest & Shoulders",
+      "title": "Push Day - Chest, Shoulders & Triceps",
       "duration_min": 45,
       "location": "{profile.get('workout_location', 'home')}",
       "exercises": [
         {{
-          "exercise_name": "Push-ups",
-          "sets": 3,
-          "reps": "12-15",
-          "rest_seconds": 60,
-          "suggested_weight_kg": null,
-          "instructions": "Keep body straight, lower chest to floor, push back up.",
+          "exercise_name": "Barbell Bench Press",
+          "sets": 4,
+          "reps": "8-10",
+          "rest_seconds": 90,
+          "suggested_weight_kg": 40,
+          "instructions": "1. Lie flat on bench, grip bar slightly wider than shoulder width. 2. Unrack bar, lower to mid-chest with elbows at 45 degrees. 3. Press up explosively to full lockout. 4. Keep feet flat, back slightly arched, shoulders pinched.",
           "muscle_group": "chest",
-          "equipment": "bodyweight",
+          "equipment": "barbell",
           "order_index": 1
         }}
       ]

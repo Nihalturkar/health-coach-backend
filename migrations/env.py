@@ -25,6 +25,10 @@ from app.models.progress import ProgressPhoto, WeeklyReport, BloodReport
 from app.models.notification import Notification
 from app.models.sync_queue import SyncQueue
 from app.models.grocery import GroceryList
+from app.models.achievement import Achievement
+from app.models.conversation import Conversation
+from app.models.exercise_log import ExerciseLog
+from app.models.feedback import MealFeedback, ExerciseFeedback
 
 target_metadata = Base.metadata
 

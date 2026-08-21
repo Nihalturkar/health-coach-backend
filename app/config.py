@@ -19,6 +19,7 @@ class Settings(BaseSettings):
     CLOUDINARY_CLOUD_NAME: str = ""
     CLOUDINARY_API_KEY: str = ""
     CLOUDINARY_API_SECRET: str = ""
+    TELEGRAM_BOT_TOKEN: str = ""  # Get from @BotFather on Telegram
 
     class Config:
         env_file = ".env"

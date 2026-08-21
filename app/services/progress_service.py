@@ -8,6 +8,60 @@ from app.models.progress import WeeklyReport
 from app.models.health_profile import HealthProfile
 
 
+async def get_streaks(db: AsyncSession, user_id: str, today: date) -> dict:
+    """Calculate current streak and best streak from tracking data.
+    A day counts if user logged at least one meal OR one workout."""
+
+    # Get all dates with meal logs
+    meal_dates_result = await db.execute(
+        select(MealLog.log_date).where(MealLog.user_id == user_id).distinct()
+    )
+    meal_dates = {row[0] for row in meal_dates_result.all()}
+
+    # Get all dates with workout logs
+    workout_dates_result = await db.execute(
+        select(WorkoutLog.log_date).where(WorkoutLog.user_id == user_id).distinct()
+    )
+    workout_dates = {row[0] for row in workout_dates_result.all()}
+
+    # Union of all active dates
+    active_dates = sorted(meal_dates | workout_dates)
+
+    if not active_dates:
+        return {"current_streak": 0, "best_streak": 0, "total_active_days": 0}
+
+    # Calculate current streak (counting back from today)
+    current_streak = 0
+    check_date = today
+    while check_date in active_dates:
+        current_streak += 1
+        check_date -= timedelta(days=1)
+
+    # If today has no activity yet, check if yesterday was active (streak still alive)
+    if current_streak == 0:
+        check_date = today - timedelta(days=1)
+        while check_date in active_dates:
+            current_streak += 1
+            check_date -= timedelta(days=1)
+
+    # Calculate best streak
+    best_streak = 0
+    streak = 1
+    for i in range(1, len(active_dates)):
+        if (active_dates[i] - active_dates[i - 1]).days == 1:
+            streak += 1
+        else:
+            best_streak = max(best_streak, streak)
+            streak = 1
+    best_streak = max(best_streak, streak)
+
+    return {
+        "current_streak": current_streak,
+        "best_streak": best_streak,
+        "total_active_days": len(active_dates),
+    }
+
+
 def get_week_number(d: date) -> int:
     """Return ISO week number for a date."""
     return d.isocalendar()[1]
@@ -106,6 +160,9 @@ async def get_dashboard(db: AsyncSession, user_id: str, today: date) -> dict:
             float(week_weights[-1].weight_kg) - float(week_weights[0].weight_kg), 1
         )
 
+    # Streaks
+    streaks = await get_streaks(db, user_id, today)
+
     return {
         "today_date": today,
         "week_number": week_number,
@@ -123,6 +180,9 @@ async def get_dashboard(db: AsyncSession, user_id: str, today: date) -> dict:
         "avg_calories_this_week": avg_calories,
         "avg_protein_this_week": avg_protein,
         "weight_change_this_week": weight_change,
+        "current_streak": streaks["current_streak"],
+        "best_streak": streaks["best_streak"],
+        "total_active_days": streaks["total_active_days"],
     }
 
 

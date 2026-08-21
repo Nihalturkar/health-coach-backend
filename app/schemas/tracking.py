@@ -96,6 +96,49 @@ class LogSleepRequest(BaseModel):
         return v
 
 
+class UpdateMealRequest(BaseModel):
+    meal_type: Optional[str] = None
+    meal_name: Optional[str] = None
+    calories: Optional[int] = None
+    protein_g: Optional[float] = None
+    carbs_g: Optional[float] = None
+    fats_g: Optional[float] = None
+
+    @field_validator("meal_type")
+    @classmethod
+    def validate_meal_type(cls, v):
+        if v is not None:
+            valid = ["breakfast", "mid_morning", "lunch", "evening_snack", "dinner", "post_workout", "shake"]
+            if v not in valid:
+                raise ValueError(f"meal_type must be one of {valid}")
+        return v
+
+
+class UpdateWorkoutRequest(BaseModel):
+    duration_min: Optional[int] = None
+    calories_burned: Optional[int] = None
+    completed_exercises: Optional[int] = None
+    total_exercises: Optional[int] = None
+    feeling: Optional[str] = None
+
+    @field_validator("feeling")
+    @classmethod
+    def validate_feeling(cls, v):
+        if v and v not in ["easy", "moderate", "hard", "exhausting"]:
+            raise ValueError("feeling must be easy, moderate, hard, or exhausting")
+        return v
+
+
+class UpdateDailyLogRequest(BaseModel):
+    log_date: date
+    weight_kg: Optional[float] = None
+    water_ml: Optional[int] = None
+    sleep_hours: Optional[float] = None
+    energy_level: Optional[int] = None
+    mood: Optional[str] = None
+    notes: Optional[str] = None
+
+
 class MealLogResponse(BaseModel):
     id: UUID
     log_date: date

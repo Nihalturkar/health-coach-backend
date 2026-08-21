@@ -2,11 +2,14 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from datetime import date
+from pydantic import BaseModel
+from typing import Optional
 
 from app.database import get_db
 from app.middleware.auth import get_current_user
 from app.models.user import User
 from app.models.meal_plan import MealPlan
+from app.models.feedback import MealFeedback
 from app.schemas.ai import GeneratePlanRequest
 from app.ai.workflows.diet_planner import generate_diet_plan, generate_alternatives
 
@@ -196,4 +199,56 @@ async def get_recipe(
         "fats_g": float(meal.fats_g) if meal.fats_g else None,
         "fiber_g": float(meal.fiber_g) if meal.fiber_g else None,
         "prep_time_min": meal.prep_time_min,
+    }
+
+
+# --- Meal Feedback ---
+
+class MealFeedbackRequest(BaseModel):
+    meal_plan_id: str
+    meal_name: str
+    meal_type: str
+    rating: int  # 1=dislike, 2=ok, 3=liked
+    reason: Optional[str] = None
+
+
+@router.post("/feedback")
+async def submit_meal_feedback(
+    body: MealFeedbackRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    feedback = MealFeedback(
+        user_id=str(current_user.id),
+        meal_plan_id=body.meal_plan_id,
+        meal_name=body.meal_name,
+        meal_type=body.meal_type,
+        rating=body.rating,
+        reason=body.reason,
+    )
+    db.add(feedback)
+    await db.commit()
+    return {"message": "Feedback saved"}
+
+
+@router.get("/feedback/summary")
+async def get_feedback_summary(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Get summary of user's meal feedback for AI context."""
+    result = await db.execute(
+        select(MealFeedback).where(
+            MealFeedback.user_id == str(current_user.id),
+        ).order_by(MealFeedback.created_at.desc()).limit(50)
+    )
+    feedbacks = result.scalars().all()
+
+    disliked = [f.meal_name for f in feedbacks if f.rating == 1]
+    liked = [f.meal_name for f in feedbacks if f.rating == 3]
+
+    return {
+        "liked_meals": liked[:10],
+        "disliked_meals": disliked[:10],
+        "total_feedback": len(feedbacks),
     }

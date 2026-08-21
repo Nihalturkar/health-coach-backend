@@ -1,5 +1,7 @@
 from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
+from pydantic import BaseModel
+from typing import Optional
 
 from app.database import get_db
 from app.middleware.auth import get_current_user
@@ -70,3 +72,26 @@ async def reassess(
         "profile": HealthProfileResponse.model_validate(result["profile"]),
         "assessment": AssessmentResult(**result["assessment"]),
     }
+
+
+@router.get("/telegram-status")
+async def get_telegram_status(
+    current_user: User = Depends(get_current_user),
+):
+    """Check if Telegram is linked."""
+    is_linked = bool(current_user.phone and current_user.phone.startswith("tg:"))
+    return {
+        "linked": is_linked,
+        "telegram_id": current_user.phone.replace("tg:", "") if is_linked else None,
+    }
+
+
+@router.post("/unlink-telegram")
+async def unlink_telegram(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Unlink Telegram from this account."""
+    current_user.phone = None
+    await db.commit()
+    return {"message": "Telegram unlinked"}

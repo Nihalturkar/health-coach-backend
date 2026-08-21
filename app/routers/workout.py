@@ -1,14 +1,18 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from datetime import date
+from pydantic import BaseModel
+from typing import Optional
 
 from app.database import get_db
 from app.middleware.auth import get_current_user
 from app.models.user import User
 from app.models.workout_plan import WorkoutPlan, WorkoutExercise
+from app.models.feedback import ExerciseFeedback
 from app.schemas.ai import GeneratePlanRequest
 from app.ai.workflows.workout_planner import generate_workout_plan
+from app.services import exercise_service
 
 router = APIRouter(prefix="/workout", tags=["Workout Plans"])
 
@@ -160,4 +164,119 @@ async def get_exercise(
         "equipment": ex.equipment,
         "gif_url": ex.gif_url,
         "video_url": ex.video_url,
+    }
+
+
+# --- Exercise Performance Logging ---
+
+class SetData(BaseModel):
+    set_number: int
+    reps: int
+    weight_kg: float = 0
+
+
+class LogExerciseRequest(BaseModel):
+    log_date: Optional[str] = None
+    exercise_name: str
+    muscle_group: Optional[str] = None
+    sets_data: list[SetData]
+    notes: Optional[str] = None
+    workout_plan_id: Optional[str] = None
+
+
+@router.post("/exercise-log")
+async def log_exercise_performance(
+    body: LogExerciseRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    data = body.model_dump()
+    data["sets_data"] = [s.model_dump() for s in body.sets_data]
+    log = await exercise_service.log_exercise(db, str(current_user.id), data)
+    return {
+        "id": str(log.id),
+        "exercise_name": log.exercise_name,
+        "total_sets": log.total_sets,
+        "total_reps": log.total_reps,
+        "max_weight_kg": float(log.max_weight_kg) if log.max_weight_kg else None,
+        "total_volume_kg": float(log.total_volume_kg) if log.total_volume_kg else None,
+    }
+
+
+@router.get("/exercise-history/{exercise_name}")
+async def get_exercise_history(
+    exercise_name: str,
+    limit: int = Query(20, ge=1, le=100),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    return await exercise_service.get_exercise_history(
+        db, str(current_user.id), exercise_name, limit
+    )
+
+
+@router.get("/personal-records")
+async def get_personal_records(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    return await exercise_service.get_personal_records(db, str(current_user.id))
+
+
+@router.get("/last-performance/{exercise_name}")
+async def get_last_performance(
+    exercise_name: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    result = await exercise_service.get_last_performance(
+        db, str(current_user.id), exercise_name
+    )
+    return result or {"message": "No previous performance found"}
+
+
+# --- Exercise Feedback ---
+
+class ExerciseFeedbackRequest(BaseModel):
+    exercise_name: str
+    difficulty: str  # "too_easy", "just_right", "too_hard", "painful"
+    notes: Optional[str] = None
+
+
+@router.post("/feedback")
+async def submit_exercise_feedback(
+    body: ExerciseFeedbackRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    feedback = ExerciseFeedback(
+        user_id=str(current_user.id),
+        exercise_name=body.exercise_name,
+        difficulty=body.difficulty,
+        notes=body.notes,
+    )
+    db.add(feedback)
+    await db.commit()
+    return {"message": "Feedback saved"}
+
+
+@router.get("/feedback/summary")
+async def get_exercise_feedback_summary(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(
+        select(ExerciseFeedback).where(
+            ExerciseFeedback.user_id == str(current_user.id),
+        ).order_by(ExerciseFeedback.created_at.desc()).limit(50)
+    )
+    feedbacks = result.scalars().all()
+
+    too_hard = [f.exercise_name for f in feedbacks if f.difficulty in ("too_hard", "painful")]
+    too_easy = [f.exercise_name for f in feedbacks if f.difficulty == "too_easy"]
+
+    return {
+        "too_hard_exercises": too_hard[:10],
+        "too_easy_exercises": too_easy[:10],
+        "total_feedback": len(feedbacks),
     }

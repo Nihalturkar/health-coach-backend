@@ -12,6 +12,7 @@ from app.ai.mcp_servers.nutrition_mcp import validate_day_nutrition, adjust_port
 from app.redis import cache_get, cache_set
 from app.models.meal_plan import MealPlan
 from app.models.health_profile import HealthProfile
+from app.models.feedback import MealFeedback
 
 
 async def generate_diet_plan(db: AsyncSession, user_id: str, week_number: int) -> list:
@@ -55,6 +56,17 @@ async def generate_diet_plan(db: AsyncSession, user_id: str, week_number: int) -
         "target_carbs": profile.target_carbs,
         "target_fats": profile.target_fats,
     }
+
+    # --- Node 2b: Get Feedback History ---
+    feedback_result = await db.execute(
+        select(MealFeedback).where(MealFeedback.user_id == user_id)
+            .order_by(MealFeedback.created_at.desc()).limit(30)
+    )
+    feedbacks = feedback_result.scalars().all()
+    disliked_meals = list({f.meal_name for f in feedbacks if f.rating == 1})
+    liked_meals = list({f.meal_name for f in feedbacks if f.rating == 3})
+    profile_data["disliked_meals"] = disliked_meals[:10]
+    profile_data["liked_meals"] = liked_meals[:10]
 
     # --- Node 3: Generate Plan (Groq LLM) ---
     prompt = get_diet_prompt(profile_data)

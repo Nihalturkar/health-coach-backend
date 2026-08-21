@@ -8,9 +8,11 @@ from sqlalchemy import select, delete
 
 from app.ai.agent import call_groq_json
 from app.ai.prompts.workout_prompt import get_workout_prompt
-from app.ai.mcp_servers.workout_mcp import determine_split, validate_workout_day, validate_consecutive_muscles
+from app.ai.mcp_servers.workout_mcp import determine_split, validate_workout_day, validate_consecutive_muscles, filter_wrong_muscle_exercises
 from app.models.workout_plan import WorkoutPlan, WorkoutExercise
 from app.models.health_profile import HealthProfile
+from app.models.feedback import ExerciseFeedback
+from app.utils.exercise_db import enrich_exercises_with_gifs
 
 
 async def generate_workout_plan(db: AsyncSession, user_id: str, week_number: int) -> list:
@@ -40,6 +42,16 @@ async def generate_workout_plan(db: AsyncSession, user_id: str, week_number: int
         "medical_conditions": profile.medical_conditions or [],
     }
 
+    # --- Node 2b: Get Exercise Feedback ---
+    feedback_result = await db.execute(
+        select(ExerciseFeedback).where(ExerciseFeedback.user_id == user_id)
+            .order_by(ExerciseFeedback.created_at.desc()).limit(30)
+    )
+    feedbacks = feedback_result.scalars().all()
+    profile_data["painful_exercises"] = list({f.exercise_name for f in feedbacks if f.difficulty == "painful"})[:10]
+    profile_data["too_hard_exercises"] = list({f.exercise_name for f in feedbacks if f.difficulty == "too_hard"})[:10]
+    profile_data["too_easy_exercises"] = list({f.exercise_name for f in feedbacks if f.difficulty == "too_easy"})[:10]
+
     # --- Node 3: Generate Exercises (Groq LLM) ---
     prompt = get_workout_prompt(profile_data)
     plan_data = call_groq_json(
@@ -53,14 +65,24 @@ async def generate_workout_plan(db: AsyncSession, user_id: str, week_number: int
     # Check consecutive muscle groups
     validate_consecutive_muscles(days)
 
-    # Individual day validation — remove exercises with unavailable equipment
+    # Individual day validation
     for day in days:
         if day.get("workout_type") == "rest":
+            day["exercises"] = []  # Ensure rest days have no exercises
             continue
+
+        workout_type = day.get("workout_type", "full_body")
+
+        # Step 1: Remove exercises with wrong muscle groups for this day type
+        day["exercises"] = filter_wrong_muscle_exercises(
+            day.get("exercises", []), workout_type
+        )
+
+        # Step 2: Remove exercises with unavailable equipment
         day_check = validate_workout_day(
             day.get("exercises", []),
             profile_data["available_equipment"],
-            day.get("workout_type", "full_body"),
+            workout_type,
         )
         if not day_check["passed"]:
             day["exercises"] = [
@@ -68,6 +90,11 @@ async def generate_workout_plan(db: AsyncSession, user_id: str, week_number: int
                 if ex.get("equipment", "bodyweight") == "bodyweight"
                 or ex.get("equipment") in profile_data["available_equipment"]
             ]
+
+    # --- Node 4.5: Enrich with GIFs from ExerciseDB ---
+    for day in days:
+        if day.get("exercises"):
+            await enrich_exercises_with_gifs(day["exercises"])
 
     # --- Node 5: Delete old + Save ---
     await db.execute(
@@ -101,6 +128,7 @@ async def generate_workout_plan(db: AsyncSession, user_id: str, week_number: int
                 rest_seconds=ex.get("rest_seconds"),
                 suggested_weight_kg=ex.get("suggested_weight_kg"),
                 instructions=ex.get("instructions"),
+                gif_url=ex.get("gif_url"),
                 muscle_group=ex.get("muscle_group"),
                 equipment=ex.get("equipment", "bodyweight"),
                 order_index=ex.get("order_index", 1),
