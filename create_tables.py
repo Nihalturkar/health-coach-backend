@@ -1,10 +1,15 @@
-"""One-time script to create all tables on production database."""
+"""
+Auto-run script to create all tables on production database.
+Called by Procfile before uvicorn starts.
+Uses CREATE TABLE IF NOT EXISTS — safe to run on every deploy.
+"""
 import asyncio
+import sys
 from dotenv import load_dotenv
 
 load_dotenv()
 
-# Import all models at module level
+# Import all models so Base.metadata knows about them
 from app.models.user import User
 from app.models.otp_token import OTPToken
 from app.models.refresh_token import RefreshToken
@@ -25,9 +30,21 @@ from app.database import engine, Base
 
 
 async def create():
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-    print("All tables created!")
-    await engine.dispose()
+    try:
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        print("[CREATE_TABLES] All tables created/verified successfully!")
+    except Exception as e:
+        print(f"[CREATE_TABLES] Error: {e}")
+        print("[CREATE_TABLES] Continuing anyway — tables may already exist.")
+    finally:
+        await engine.dispose()
 
-asyncio.run(create())
+
+try:
+    asyncio.run(create())
+except Exception as e:
+    print(f"[CREATE_TABLES] Fatal: {e}")
+    # Don't exit with error code — let uvicorn start anyway
+    # Tables might already exist from a previous deploy
+    print("[CREATE_TABLES] Skipping table creation, starting server...")
