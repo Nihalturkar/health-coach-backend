@@ -268,7 +268,7 @@ async def telegram_webhook(
 
 @router.get("/setup-webhook")
 async def setup_webhook():
-    """Set the Telegram webhook URL. Call once after deploying."""
+    """Set the Telegram webhook URL and drop any stuck pending updates."""
     if not settings.TELEGRAM_BOT_TOKEN:
         return {"error": "TELEGRAM_BOT_TOKEN not set in environment"}
 
@@ -276,8 +276,73 @@ async def setup_webhook():
     url = f"https://api.telegram.org/bot{settings.TELEGRAM_BOT_TOKEN}/setWebhook"
 
     async with httpx.AsyncClient() as client:
-        resp = await client.post(url, json={"url": webhook_url})
+        resp = await client.post(url, json={
+            "url": webhook_url,
+            "drop_pending_updates": True,
+        })
         return resp.json()
+
+
+@router.get("/debug")
+async def debug_bot(
+    db: AsyncSession = Depends(get_db),
+):
+    """Debug endpoint — test each component."""
+    results = {}
+
+    # Test 1: DB connection
+    try:
+        from sqlalchemy import text
+        r = await db.execute(text("SELECT 1"))
+        results["db_connection"] = "OK"
+    except Exception as e:
+        results["db_connection"] = f"FAIL: {e}"
+
+    # Test 2: Check if phone column exists
+    try:
+        from sqlalchemy import text
+        r = await db.execute(text("SELECT column_name FROM information_schema.columns WHERE table_name='users' AND column_name='phone'"))
+        row = r.first()
+        results["phone_column"] = "EXISTS" if row else "MISSING"
+    except Exception as e:
+        results["phone_column"] = f"FAIL: {e}"
+
+    # Test 3: Check new tables exist
+    try:
+        from sqlalchemy import text
+        r = await db.execute(text(
+            "SELECT table_name FROM information_schema.tables WHERE table_schema='public' AND table_name IN ('achievements','conversations','exercise_logs','meal_feedback','exercise_feedback')"
+        ))
+        tables = [row[0] for row in r.all()]
+        results["new_tables"] = tables if tables else "NONE FOUND"
+    except Exception as e:
+        results["new_tables"] = f"FAIL: {e}"
+
+    # Test 4: Telegram token
+    results["telegram_token"] = "SET" if settings.TELEGRAM_BOT_TOKEN else "NOT SET"
+
+    # Test 5: Test send message
+    try:
+        if settings.TELEGRAM_BOT_TOKEN:
+            url = f"https://api.telegram.org/bot{settings.TELEGRAM_BOT_TOKEN}/getMe"
+            async with httpx.AsyncClient() as client:
+                resp = await client.get(url)
+                bot_info = resp.json()
+                results["bot_info"] = bot_info.get("result", {}).get("username", "unknown")
+        else:
+            results["bot_info"] = "NO TOKEN"
+    except Exception as e:
+        results["bot_info"] = f"FAIL: {e}"
+
+    # Test 6: Groq API
+    try:
+        from app.ai.agent import call_groq
+        r = call_groq("Say hi", "Say hi in 2 words", temperature=0, max_tokens=10)
+        results["groq_api"] = "OK" if r else "EMPTY"
+    except Exception as e:
+        results["groq_api"] = f"FAIL: {e}"
+
+    return results
 
 
 @router.get("/webhook-info")
